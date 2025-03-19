@@ -1,0 +1,17 @@
+{
+    "type": "EACH_PARTICIPANT_IN_SEPERATE_ROWS",
+    "dyadIdColumnName": "dyad",
+    "participantDiscriminatorColumnName": "role",
+    "participantAColumns": {
+      "discriminatorValue": "1",
+      "ordinalityColumnName": "talk_time.onset",
+      "transcriptColumnName": "talk_time.code01",
+      "toPredictColumnName": "gender_identity_1_00"
+    },
+    "participantBColumns": {
+      "discriminatorValue": "-1",
+      "ordinalityColumnName": "talk_time.onset",
+      "transcriptColumnName": "talk_time.talk_time",
+      "toPredictColumnName": "gender_identity_1_00"
+    }
+  }

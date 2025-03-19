@@ -1,0 +1,5 @@
+File Name,Participant,Label,Actual Output,LLM Prediction,Is Match?
+Dyad2_Angelique.csv,A,gender,male,Male,TRUE
+Dyad2_Angelique.csv,B,gender,female,female,TRUE
+Dyad3_Angelique.csv,A,gender,male,female,FALSE
+Dyad3_Angelique.csv,B,gender,female,male,FALSE

@@ -1,0 +1,3 @@
+Participant A column names,,,Participant B column names,,,Predictions,,,
+Talktime Onset,Talktime Offset,Transcript,Talktime Onset,Talktime Offset,Transcript,Question,Choices (Optional) - comma seperated,Expect. Answer,Output Label
+talktime_a.onset,talktime_a.offset,talktime_a.t,talktime_b.onset,talktime_b.offset,talktime_b.t,Which gender do you identify as?,"male, female, transgender male, transgender female, genderqueer/gender nonconforming, I'd prefer not to say, other",male,gender
