@@ -5,13 +5,13 @@
     "participantAColumns": {
       "discriminatorValue": "1",
       "ordinalityColumnName": "talk_time.onset",
-      "transcriptColumnName": "talk_time.code01",
+      "transcriptColumnName": "transcript",
       "toPredictColumnName": "gender_identity_1_00"
     },
     "participantBColumns": {
       "discriminatorValue": "-1",
       "ordinalityColumnName": "talk_time.onset",
-      "transcriptColumnName": "talk_time.talk_time",
+      "transcriptColumnName": "transcript",
       "toPredictColumnName": "gender_identity_1_00"
     }
   }

@@ -1,10 +1,11 @@
 import { Static, Type } from "@sinclair/typebox";
 import Ajv from "ajv";
 import csvParser from "csv-parser";
+import csvStringify from "csv-stringify/sync";
 import dotenv from 'dotenv';
 import fs, { readdirSync, readFileSync } from 'fs';
 import OpenAI from "openai";
-import { ChatCompletionTokenLogprob } from "openai/resources";
+import { ChatCompletionTokenLogprob, ChatModel } from "openai/resources";
 import path, { dirname } from "path";
 import { llmIsParticipant } from "./methods/llm_is_participant/llm_is_participant";
 import { MethodType } from "./methods/types";
@@ -24,7 +25,9 @@ const schema = Type.Object({
 async function main() {
     const args = process.argv.slice(2); // Remove node and script path
     const dataRoot = path.join(path.resolve('./data'), args[0] ?? '_test');
-    const method = (args[1] ?? MethodType.EACH_PARTICIPANT_SIMULTANEOUS) as MethodType;
+    const method = (args[1] ?? MethodType.EACH_TURN_ALONE) as MethodType;
+    const model = (args[2] ?? 'gpt-4o-mini') as ChatModel;
+    const question = (args[3] ?? 'Which gender do you identify as?') as string;
 
     if (!Object.values(MethodType).includes(method)) {
         throw new Error(`Invalid method: ${method}. Please use one of the following: ${Object.values(MethodType).join(', ')}`);
@@ -203,35 +206,39 @@ async function main() {
         });
 
 
-        // const results = await Promise.all(dyads.map(dyad => runMethod(method, dyad, columnMap)));
-        const results = await runMethod(method, dyads[8], columnMap);
+        const results = await Promise.all(dyads.map(dyad => runMethod(method, dyad, columnMap, model, question)));
+        // const results = await runMethod(method, dyads[8], columnMap);
 
-        writeOutput(results.flat(), path.join(outputFolderPath, file.replace('.csv', '_llm_output.csv')));
-        console.log(`Wrote output to ${path.join(outputFolderPath, file.replace('.csv', '_llm_output.csv'))}`);
+        writeOutput(results.flat(), path.join(outputFolderPath, file.replace('.csv', `_${method}_output.csv`)));
+        console.log(`Wrote output to ${path.join(outputFolderPath, file.replace('.csv', `_${method}_output.csv`))}`);
     }
 
     console.log('Done!');
 }
 
-async function runMethod(method: MethodType, dyad: Dyad, columnMap: ColumnMap): Promise<ReturnType<typeof parseResult>[]> {
+async function runMethod(method: MethodType, dyad: Dyad, columnMap: ColumnMap, model: ChatModel, question: string): Promise<(ReturnType<typeof parseResult>)[]> {
+    console.log(`Running ${method} for dyad ${dyad.dyadId}...`);
     switch (method) {
         case MethodType.EACH_PARTICIPANT_SIMULTANEOUS:
             return Promise.all((['A', 'B'] as const).map(async (participant) => {
-                const output = await llmIsParticipant(openAi, dyad.turns, `Which gender do you identify as?`, { type: 'json_schema', json_schema: { strict: true, name: 'gender', schema: { ...schema, additionalProperties: false } } }, participant);
+                const turns = dyad.turns;
+                const output = await llmIsParticipant(openAi, turns, question, { type: 'json_schema', json_schema: { strict: true, name: 'gender', schema: { ...schema, additionalProperties: false } } }, participant, model);
                 const result = parseResult(columnMap, dyad, participant, output);
-                return result;
+                return { ...result, transcript: turns.map(turn => `${turn.participant}: ${turn.transcript}`).join('\n') };
             }));
         case MethodType.EACH_PARTICIPANT_ALONE:
             return Promise.all((['A', 'B'] as const).map(async (participant) => {
-                const output = await llmIsParticipant(openAi, dyad.turns.filter(turn => turn.participant === participant), `Which gender do you identify as?`, { type: 'json_schema', json_schema: { strict: true, name: 'gender', schema: { ...schema, additionalProperties: false } } }, participant);
+                const turns = dyad.turns.filter(turn => turn.participant === participant);
+                const output = await llmIsParticipant(openAi, turns, question, { type: 'json_schema', json_schema: { strict: true, name: 'gender', schema: { ...schema, additionalProperties: false } } }, participant, model);
                 const result = parseResult(columnMap, dyad, participant, output);
-                return result;
+                return { ...result, transcript: turns.map(turn => `${turn.participant}: ${turn.transcript}`).join('\n') };
             }));
         case MethodType.EACH_TURN_ALONE:
             return Promise.all(dyad.turns.map(async (turn) => {
-                const output = await llmIsParticipant(openAi, [turn], `Which gender do you identify as?`, { type: 'json_schema', json_schema: { strict: true, name: 'gender', schema: { ...schema, additionalProperties: false } } }, turn.participant);
+                const turns = [turn];
+                const output = await llmIsParticipant(openAi, turns, question, { type: 'json_schema', json_schema: { strict: true, name: 'gender', schema: { ...schema, additionalProperties: false } } }, turn.participant, model);
                 const result = parseResult(columnMap, dyad, turn.participant, output, turn.ordinality);
-                return result;
+                return { ...result, transcript: turns.map(turn => `${turn.participant}: ${turn.transcript}`).join('\n') };
             }));
         default:
             throw new Error(`Invalid method: ${method}. Please use one of the following: ${Object.values(MethodType).join(', ')}`);
@@ -239,15 +246,14 @@ async function runMethod(method: MethodType, dyad: Dyad, columnMap: ColumnMap): 
 }
 
 function writeOutput(output: ReturnType<typeof parseResult>[], path: string) {
-    const csvHeader = Object.keys(output[0]).join(',');
-    const csvRows = output.map(row => Object.values(row).join(','));
-
     const dir = dirname(path);
     if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, { recursive: true });
     }
 
-    fs.writeFileSync(path, [csvHeader, ...csvRows].join('\n'));
+    const csvString = csvStringify.stringify(output, { header: true, columns: Object.keys(output[0]) });
+
+    fs.writeFileSync(path, csvString);
 }
 
 function parseResult(columnMap: ColumnMap, dyad: Dyad, participant: 'A' | 'B', result: { content: Static<typeof schema>, logprobs: ChatCompletionTokenLogprob[] | null }, ordinality?: number): Record<string, string | number | boolean | undefined> {
@@ -309,4 +315,4 @@ function logProbsToPercentage(logprobs: { [key: string]: number }): { [key: stri
     return normalizedPercentages;
 }
 
-main();
+main().catch(console.error);

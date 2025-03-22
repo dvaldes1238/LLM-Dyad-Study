@@ -1,13 +1,13 @@
 import dotenv from 'dotenv';
 import fs from 'fs';
 import OpenAI from "openai";
-import { ChatCompletionAssistantMessageParam, ChatCompletionSystemMessageParam, ChatCompletionUserMessageParam, ResponseFormatJSONSchema } from "openai/resources";
+import { ChatCompletionAssistantMessageParam, ChatCompletionSystemMessageParam, ChatCompletionUserMessageParam, ChatModel, ResponseFormatJSONSchema } from "openai/resources";
 import { Turn } from "../../types";
 dotenv.config();
 
 
 
-export async function llmIsParticipant(openAi: OpenAI, conversation: Turn[], question: string, schema: ResponseFormatJSONSchema, whichParticipant: 'A' | 'B', retryCount: number = 0) {
+export async function llmIsParticipant(openAi: OpenAI, conversation: Turn[], question: string, schema: ResponseFormatJSONSchema, whichParticipant: 'A' | 'B', model: ChatModel = 'gpt-4o-mini', retryCount: number = 0) {
     const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
         {
             role: 'system',
@@ -25,7 +25,7 @@ export async function llmIsParticipant(openAi: OpenAI, conversation: Turn[], que
     ];
 
     const completion = await openAi.chat.completions.create({
-        model: 'gpt-4o-mini',
+        model,
         logprobs: true,
         top_logprobs: 10,
         stream: false,
@@ -39,7 +39,7 @@ export async function llmIsParticipant(openAi: OpenAI, conversation: Turn[], que
         return { content: JSON.parse(completion.choices[0].message.content!), logprobs: completion.choices[0].logprobs!.content };
     } catch (error) {
         if (retryCount < 1) {
-            return llmIsParticipant(openAi, conversation, question, schema, whichParticipant, retryCount + 1);
+            return llmIsParticipant(openAi, conversation, question, schema, whichParticipant, model, retryCount + 1);
         }
         throw error;
     }
