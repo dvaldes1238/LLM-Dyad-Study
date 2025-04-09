@@ -20,13 +20,12 @@ const openAi = new OpenAI({
 
 const args = process.argv.slice(2); // Remove node and script path
 
-const isTransformation = Boolean(args[2]);
+const isTransformation = Boolean(args[3]);
 
-const method = (args[0] ?? MethodType.EACH_TURN_ALONE) as MethodType;
-const model = (args[1] ?? 'gpt-4o-mini') as ChatModel;
-const question = (isTransformation ? args[2] : 'Which gender do you identify as?') as string;
-
-const dataRoot = path.join(path.resolve('./data'), args[3] ?? '_test');
+const dataRoot = path.join(path.resolve('./data'), args[0] ?? '_test');
+const method = (args[1] ?? MethodType.EACH_TURN_ALONE) as MethodType;
+const model = (args[2] ?? 'gpt-4o-mini') as ChatModel;
+const question = (isTransformation ? args[3] : 'Which gender do you identify as?') as string;
 
 if (!Object.values(MethodType).includes(method)) {
     throw new Error(`Invalid method: ${method}. Please use one of the following: ${Object.values(MethodType).join(', ')}`);
@@ -207,8 +206,8 @@ async function main() {
         });
 
 
-        // const results = await Promise.all(dyads.map(dyad => runMethod(method, dyad, columnMap, model, question)));
-        const results = await runMethod(method, dyads[8], columnMap, model, question);
+        const results = await Promise.all(dyads.map(dyad => runMethod(method, dyad, columnMap, model, question)));
+        // const results = await runMethod(method, dyads[8], columnMap, model, question);
 
         writeOutput(results.flat(), path.join(outputFolderPath, file.replace('.csv', `_${method}_output.csv`)));
         console.log(`Wrote output to ${path.join(outputFolderPath, file.replace('.csv', `_${method}_output.csv`))}`);
