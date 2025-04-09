@@ -182,7 +182,7 @@ async function main() {
                 console.log(`Empty, undefined, or N/A values for dyad ${dyad.dyadId}:`);
                 Object.entries(dyad.emptyUndefinedOrNaValuesCount).forEach(([key, value]) => {
                     if (value > 0) {
-                        console.log(`\t\t-${key}: ${value}`);
+                        console.log(`\t\t- ${key}: ${value} count`);
                     }
                 });
             }

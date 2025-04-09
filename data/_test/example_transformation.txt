@@ -1,0 +1,1 @@
+npm run start AD_study EACH_TURN_ALONE gpt-4o-mini "summarize the provided content in three single-word categories describing the content. Separate by comma. respond with one to three categories for each sentence only. don't respond with anything else EVER. example response: category1, category2, category3"
