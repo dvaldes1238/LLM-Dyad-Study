@@ -1,14 +1,14 @@
-import { Static, Type } from "@sinclair/typebox";
 import Ajv from "ajv";
 import csvParser from "csv-parser";
 import csvStringify from "csv-stringify/sync";
 import dotenv from 'dotenv';
 import fs, { readdirSync, readFileSync } from 'fs';
 import OpenAI from "openai";
-import { ChatCompletionTokenLogprob, ChatModel } from "openai/resources";
+import { ChatModel } from "openai/resources";
 import path, { dirname } from "path";
-import { llmIsParticipant } from "./methods/llm_is_participant/llm_is_participant";
-import { MethodType } from "./methods/types";
+import { llmIsParticipant, parseLlmIsParticipantResult } from "./methods/llm_is_participant/llm_is_participant";
+import { parseSimpleTransformationResult, simpleTransformation } from "./methods/simple_transformation/simple_transformation";
+import { MethodResultType, MethodType } from "./methods/types";
 import { BothParticipantsInOneRowParser } from "./parsers/BothParticipantsInOneRow";
 import { EachParticipantInSeperateRowsParser } from "./parsers/EachParticipantInSeperateRows";
 import { ColumnMap, ColumnMapTypeEnum, Dyad } from "./types";
@@ -18,20 +18,21 @@ const openAi = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY,
 });
 
-const schema = Type.Object({
-    gender: Type.Union([Type.Literal('male'), Type.Literal('female')]),
-});
+const args = process.argv.slice(2); // Remove node and script path
+
+const isTransformation = Boolean(args[2]);
+
+const method = (args[0] ?? MethodType.EACH_TURN_ALONE) as MethodType;
+const model = (args[1] ?? 'gpt-4o-mini') as ChatModel;
+const question = (isTransformation ? args[2] : 'Which gender do you identify as?') as string;
+
+const dataRoot = path.join(path.resolve('./data'), args[3] ?? '_test');
+
+if (!Object.values(MethodType).includes(method)) {
+    throw new Error(`Invalid method: ${method}. Please use one of the following: ${Object.values(MethodType).join(', ')}`);
+}
 
 async function main() {
-    const args = process.argv.slice(2); // Remove node and script path
-    const dataRoot = path.join(path.resolve('./data'), args[0] ?? '_test');
-    const method = (args[1] ?? MethodType.EACH_TURN_ALONE) as MethodType;
-    const model = (args[2] ?? 'gpt-4o-mini') as ChatModel;
-    const question = (args[3] ?? 'Which gender do you identify as?') as string;
-
-    if (!Object.values(MethodType).includes(method)) {
-        throw new Error(`Invalid method: ${method}. Please use one of the following: ${Object.values(MethodType).join(', ')}`);
-    }
 
     console.log('Using folder', dataRoot);
     console.log('Using method', method);
@@ -206,8 +207,8 @@ async function main() {
         });
 
 
-        const results = await Promise.all(dyads.map(dyad => runMethod(method, dyad, columnMap, model, question)));
-        // const results = await runMethod(method, dyads[8], columnMap);
+        // const results = await Promise.all(dyads.map(dyad => runMethod(method, dyad, columnMap, model, question)));
+        const results = await runMethod(method, dyads[8], columnMap, model, question);
 
         writeOutput(results.flat(), path.join(outputFolderPath, file.replace('.csv', `_${method}_output.csv`)));
         console.log(`Wrote output to ${path.join(outputFolderPath, file.replace('.csv', `_${method}_output.csv`))}`);
@@ -216,28 +217,63 @@ async function main() {
     console.log('Done!');
 }
 
-async function runMethod(method: MethodType, dyad: Dyad, columnMap: ColumnMap, model: ChatModel, question: string): Promise<(ReturnType<typeof parseResult>)[]> {
-    console.log(`Running ${method} for dyad ${dyad.dyadId}...`);
+async function runMethod(method: MethodType, dyad: Dyad, columnMap: ColumnMap, model: ChatModel, question: string): Promise<MethodResultType[]> {
+    console.log(`${isTransformation ? 'Transforming' : 'Running'} ${method} for dyad ${dyad.dyadId}...`);
+
     switch (method) {
         case MethodType.EACH_PARTICIPANT_SIMULTANEOUS:
+            if (isTransformation) {
+
+            }
+
             return Promise.all((['A', 'B'] as const).map(async (participant) => {
                 const turns = dyad.turns;
-                const output = await llmIsParticipant(openAi, turns, question, { type: 'json_schema', json_schema: { strict: true, name: 'gender', schema: { ...schema, additionalProperties: false } } }, participant, model);
-                const result = parseResult(columnMap, dyad, participant, output);
+
+                let result: MethodResultType;
+
+                if (isTransformation) {
+                    const output = await simpleTransformation(openAi, turns, question, model);
+                    result = parseSimpleTransformationResult(columnMap, dyad, participant, output);
+                } else {
+                    const output = await llmIsParticipant(openAi, turns, question, participant, model);
+                    result = parseLlmIsParticipantResult(columnMap, dyad, participant, output);
+                }
+
                 return { ...result, transcript: turns.map(turn => `${turn.participant}: ${turn.transcript}`).join('\n') };
             }));
         case MethodType.EACH_PARTICIPANT_ALONE:
+            if (isTransformation) {
+
+            }
+
             return Promise.all((['A', 'B'] as const).map(async (participant) => {
                 const turns = dyad.turns.filter(turn => turn.participant === participant);
-                const output = await llmIsParticipant(openAi, turns, question, { type: 'json_schema', json_schema: { strict: true, name: 'gender', schema: { ...schema, additionalProperties: false } } }, participant, model);
-                const result = parseResult(columnMap, dyad, participant, output);
+
+                let result: MethodResultType;
+
+                if (isTransformation) {
+                    const output = await simpleTransformation(openAi, turns, question, model);
+                    result = parseSimpleTransformationResult(columnMap, dyad, participant, output);
+                } else {
+                    const output = await llmIsParticipant(openAi, turns, question, participant, model);
+                    result = parseLlmIsParticipantResult(columnMap, dyad, participant, output);
+                }
+
                 return { ...result, transcript: turns.map(turn => `${turn.participant}: ${turn.transcript}`).join('\n') };
             }));
         case MethodType.EACH_TURN_ALONE:
             return Promise.all(dyad.turns.map(async (turn) => {
                 const turns = [turn];
-                const output = await llmIsParticipant(openAi, turns, question, { type: 'json_schema', json_schema: { strict: true, name: 'gender', schema: { ...schema, additionalProperties: false } } }, turn.participant, model);
-                const result = parseResult(columnMap, dyad, turn.participant, output, turn.ordinality);
+                let result: MethodResultType;
+
+                if (isTransformation) {
+                    const output = await simpleTransformation(openAi, turns, question, model);
+                    result = parseSimpleTransformationResult(columnMap, dyad, turn.participant, output, turn.ordinality);
+                } else {
+                    const output = await llmIsParticipant(openAi, turns, question, turn.participant, model);
+                    result = parseLlmIsParticipantResult(columnMap, dyad, turn.participant, output, turn.ordinality);
+                }
+
                 return { ...result, transcript: turns.map(turn => `${turn.participant}: ${turn.transcript}`).join('\n') };
             }));
         default:
@@ -245,7 +281,7 @@ async function runMethod(method: MethodType, dyad: Dyad, columnMap: ColumnMap, m
     }
 }
 
-function writeOutput(output: ReturnType<typeof parseResult>[], path: string) {
+function writeOutput(output: MethodResultType[], path: string) {
     const dir = dirname(path);
     if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, { recursive: true });
@@ -256,63 +292,5 @@ function writeOutput(output: ReturnType<typeof parseResult>[], path: string) {
     fs.writeFileSync(path, csvString);
 }
 
-function parseResult(columnMap: ColumnMap, dyad: Dyad, participant: 'A' | 'B', result: { content: Static<typeof schema>, logprobs: ChatCompletionTokenLogprob[] | null }, ordinality?: number): Record<string, string | number | boolean | undefined> {
-    const logprob = result.logprobs?.find(logprob => logprob.token === result.content.gender);
-    const maleFemaleLogprobs = logprob?.top_logprobs.filter(logprob => logprob.token === 'male' || logprob.token === 'female').map(logprob => ({
-        [logprob.token]: logprob.logprob
-    })).reduce((acc, logprob) => ({
-        ...acc,
-        ...logprob
-    }), {} as { [key: string]: number });
-
-    const percentages = maleFemaleLogprobs ? logProbsToPercentage(maleFemaleLogprobs) : logprob ? logProbsToPercentage({ [result.content.gender]: logprob.logprob }) : undefined;
-    const actualValue = dyad.turns.find(turn => turn.participant === participant && turn.toPredict !== '')?.toPredict;
-
-    switch (columnMap.type) {
-        case ColumnMapTypeEnum.BOTH_PARTICIPANTS_IN_ONE_ROW:
-            return {
-                [columnMap.dyadIdColumnName]: dyad.dyadId,
-                participant: participant,
-                [participant === 'A' ? columnMap.participantAColumns.toPredictColumnName : columnMap.participantBColumns.toPredictColumnName]: actualValue,
-
-                ...(ordinality ? { [participant === 'A' ? columnMap.participantAColumns.ordinalityColumnName : columnMap.participantBColumns.ordinalityColumnName]: ordinality } : {}),
-
-                predictedValue: result.content.gender,
-                malePercentage: percentages?.male,
-                femalePercentage: percentages?.female,
-            };
-        case ColumnMapTypeEnum.EACH_PARTICIPANT_IN_SEPERATE_ROWS:
-            return {
-                [columnMap.dyadIdColumnName]: dyad.dyadId,
-                [columnMap.participantDiscriminatorColumnName]: participant === 'A' ? columnMap.participantAColumns.discriminatorValue : columnMap.participantBColumns.discriminatorValue,
-                [participant === 'A' ? columnMap.participantAColumns.toPredictColumnName : columnMap.participantBColumns.toPredictColumnName]: actualValue,
-
-                ...(ordinality ? { [participant === 'A' ? columnMap.participantAColumns.ordinalityColumnName : columnMap.participantBColumns.ordinalityColumnName]: ordinality } : {}),
-
-                predictedValue: result.content.gender,
-                malePercentage: percentages?.male,
-                femalePercentage: percentages?.female,
-            };
-    }
-}
-
-function logProbsToPercentage(logprobs: { [key: string]: number }): { [key: string]: number } {
-    // Convert log probabilities to probabilities
-    const probabilities: { [key: string]: number } = {};
-    for (const token in logprobs) {
-        probabilities[token] = Math.exp(logprobs[token]);
-    }
-
-    // Compute total probability sum
-    const totalProb = Object.values(probabilities).reduce((sum, p) => sum + p, 0);
-
-    // Normalize to sum up to 100%
-    const normalizedPercentages: { [key: string]: number } = {};
-    for (const token in probabilities) {
-        normalizedPercentages[token] = (probabilities[token] / totalProb) * 100;
-    }
-
-    return normalizedPercentages;
-}
 
 main().catch(console.error);
