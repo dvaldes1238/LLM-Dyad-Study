@@ -221,10 +221,6 @@ async function runMethod(method: MethodType, dyad: Dyad, columnMap: ColumnMap, m
 
     switch (method) {
         case MethodType.EACH_PARTICIPANT_SIMULTANEOUS:
-            if (isTransformation) {
-
-            }
-
             return Promise.all((['A', 'B'] as const).map(async (participant) => {
                 const turns = dyad.turns;
 
@@ -238,13 +234,9 @@ async function runMethod(method: MethodType, dyad: Dyad, columnMap: ColumnMap, m
                     result = parseLlmIsParticipantResult(columnMap, dyad, participant, output);
                 }
 
-                return { ...result, transcript: turns.map(turn => `${turn.participant}: ${turn.transcript}`).join('\n') };
+                return { ...result, transcript: turns.map(turn => `${turn.participant}: ${turn.transcript.replaceAll('"', "'").replaceAll('\n', ' ')}`).join('\n') };
             }));
         case MethodType.EACH_PARTICIPANT_ALONE:
-            if (isTransformation) {
-
-            }
-
             return Promise.all((['A', 'B'] as const).map(async (participant) => {
                 const turns = dyad.turns.filter(turn => turn.participant === participant);
 
