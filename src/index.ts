@@ -18,6 +18,8 @@ const openAi = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY,
 });
 
+// npm run start Tutor_study EACH_TURN_ALONE gpt-4o-mini
+
 const args = process.argv.slice(2); // Remove node and script path
 
 const isTransformation = Boolean(args[3]);
@@ -205,8 +207,15 @@ async function main() {
             });
         });
 
-
-        const results = await Promise.all(dyads.map(dyad => runMethod(method, dyad, columnMap, model, question)));
+        // Process dyads in batches of 50
+        const batchSize = method === MethodType.EACH_TURN_ALONE ? 10 : 250;
+        let results: MethodResultType[][] = [];
+        for (let i = 0; i < dyads.length; i += batchSize) {
+            const batch = dyads.slice(i, i + batchSize);
+            console.log(`Processing batch ${i / batchSize + 1}/${Math.ceil(dyads.length / batchSize)} (${batch.length} dyads)...`);
+            const batchResults = await Promise.all(batch.map(dyad => runMethod(method, dyad, columnMap, model, question)));
+            results = results.concat(batchResults.flat());
+        }
         // const results = await runMethod(method, dyads[8], columnMap, model, question);
 
         writeOutput(results.flat(), path.join(outputFolderPath, file.replace('.csv', `_${method}_output.csv`)));
@@ -253,20 +262,28 @@ async function runMethod(method: MethodType, dyad: Dyad, columnMap: ColumnMap, m
                 return { ...result, transcript: turns.map(turn => `${turn.participant}: ${turn.transcript}`).join('\n') };
             }));
         case MethodType.EACH_TURN_ALONE:
-            return Promise.all(dyad.turns.map(async (turn) => {
-                const turns = [turn];
-                let result: MethodResultType;
+            // Process turns in batches of 50
+            const batchSize = 50;
+            let allResults: MethodResultType[] = [];
+            for (let i = 0; i < dyad.turns.length; i += batchSize) {
+                const turnBatch = dyad.turns.slice(i, i + batchSize);
+                const batchResults = await Promise.all(turnBatch.map(async (turn) => {
+                    const turns = [turn];
+                    let result: MethodResultType;
 
-                if (isTransformation) {
-                    const output = await simpleTransformation(openAi, turns, question, model);
-                    result = parseSimpleTransformationResult(columnMap, dyad, turn.participant, output, turn.ordinality);
-                } else {
-                    const output = await llmIsParticipant(openAi, turns, question, turn.participant, model);
-                    result = parseLlmIsParticipantResult(columnMap, dyad, turn.participant, output, turn.ordinality);
-                }
+                    if (isTransformation) {
+                        const output = await simpleTransformation(openAi, turns, question, model);
+                        result = parseSimpleTransformationResult(columnMap, dyad, turn.participant, output, turn.ordinality);
+                    } else {
+                        const output = await llmIsParticipant(openAi, turns, question, turn.participant, model);
+                        result = parseLlmIsParticipantResult(columnMap, dyad, turn.participant, output, turn.ordinality);
+                    }
 
-                return { ...result, transcript: turns.map(turn => `${turn.participant}: ${turn.transcript}`).join('\n') };
-            }));
+                    return { ...result, transcript: turns.map(turn => `${turn.participant}: ${turn.transcript}`).join('\n') };
+                }));
+                allResults = allResults.concat(batchResults);
+            }
+            return allResults;
         default:
             throw new Error(`Invalid method: ${method}. Please use one of the following: ${Object.values(MethodType).join(', ')}`);
     }
