@@ -16,6 +16,7 @@ dotenv.config();
 
 const openAi = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY,
+    timeout: 10000
 });
 
 // npm run start Tutor_study EACH_TURN_ALONE gpt-4o-mini
@@ -31,6 +32,28 @@ const question = (isTransformation ? args[3] : 'Which gender do you identify as?
 
 if (!Object.values(MethodType).includes(method)) {
     throw new Error(`Invalid method: ${method}. Please use one of the following: ${Object.values(MethodType).join(', ')}`);
+}
+
+// Add a retry utility function at the top level
+async function retryWithBackoff<T>(fn: () => Promise<T>, maxRetries = 3, baseDelayMs = 1000): Promise<T> {
+  let retries = 0;
+  
+  while (true) {
+    try {
+      return await fn();
+    } catch (error) {
+      if (retries >= maxRetries) {
+        throw error; // Max retries reached, rethrow the error
+      }
+      
+      // Calculate delay with exponential backoff and jitter
+      const delay = baseDelayMs * Math.pow(2, retries) * (0.5 + Math.random() * 0.5);
+      console.log(`Attempt ${retries + 1} failed, retrying in ${Math.round(delay)}ms...`);
+      
+      await new Promise(resolve => setTimeout(resolve, delay));
+      retries++;
+    }
+  }
 }
 
 async function main() {
@@ -263,7 +286,7 @@ async function runMethod(method: MethodType, dyad: Dyad, columnMap: ColumnMap, m
             }));
         case MethodType.EACH_TURN_ALONE:
             // Process turns in batches of 50
-            const batchSize = 50;
+            const batchSize = 25;
             let allResults: MethodResultType[] = [];
             for (let i = 0; i < dyad.turns.length; i += batchSize) {
                 const turnBatch = dyad.turns.slice(i, i + batchSize);
@@ -272,10 +295,14 @@ async function runMethod(method: MethodType, dyad: Dyad, columnMap: ColumnMap, m
                     let result: MethodResultType;
 
                     if (isTransformation) {
-                        const output = await simpleTransformation(openAi, turns, question, model);
+                        const output = await retryWithBackoff(() => 
+                            simpleTransformation(openAi, turns, question, model)
+                        );
                         result = parseSimpleTransformationResult(columnMap, dyad, turn.participant, output, turn.ordinality);
                     } else {
-                        const output = await llmIsParticipant(openAi, turns, question, turn.participant, model);
+                        const output = await retryWithBackoff(() => 
+                            llmIsParticipant(openAi, turns, question, turn.participant, model)
+                        );
                         result = parseLlmIsParticipantResult(columnMap, dyad, turn.participant, output, turn.ordinality);
                     }
 
